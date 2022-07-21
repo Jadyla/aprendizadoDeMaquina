@@ -9,6 +9,7 @@ library("base")
 library("dplyr")
 library("tree")
 library("RSNNS")
+library("rpart")
 
 
 treinamento <- read_csv("treino.csv")
@@ -18,7 +19,10 @@ separaTreino <- treinamento
 #--------------------------------------------------------------------------------------------------------
 #### VARIÁVEIS GLOBAIS ####
 K <- NULL
+L <- NULL
 result <- NULL
+resultMlp <- NULL
+resultAd <- NULL
 
 VPknn <- 0
 FNknn <- 0
@@ -98,7 +102,6 @@ matrizConfusao <- function(targetTest, result, VP, VN, FP, FN, tam){
 
 #--------------------------------------------------------------------------------------------------------
 #### MÉTRICAS DE ANÁLISE ####
-
 precisao <- function(VP, FP, nome){
   prec = VP / (VP + FP)
   print(paste("Precisao", nome, "=", prec))
@@ -120,7 +123,7 @@ for (i in seq_along(vetorBaseline)) {
     vetorBaseline[i] = 0
   }
 }
-print(vetorBaseline)
+##print(vetorBaseline)
 valoresBase <- matrizConfusao(testeFinal$shot_made_flag, vetorBaseline, VPbase, VNbase, FPbase, FNbase, 2034)
 VPbase =+ valoresBase$VP
 VNbase =+ valoresBase$VN
@@ -152,7 +155,7 @@ melhorK <- function(train, test, targetTrain, targetTest, K){
   for (i in 1:50) {
     result <- knn(train = train, test = test, cl = targetTrain, k = i)
     erro[i] <- mean(targetTest != result)
-    print(paste("K = " , i , ":" , erro[i]))
+    ##print(paste("K = " , i , ":" , erro[i]))
     
     if (menor > erro[i]){
       menor = erro[i]
@@ -184,7 +187,15 @@ knnFunction <- function(train, test, targetTrain, targetTest, K){
 #--------------------------------------------------------------------------------------------------------
 #### ÁRVORE DE DECISÃO ####
 treeFunction <- function(train, test, targetTrain){
-  model <- tree(train ~ ., targetTrain)
+  predVal <- NULL
+  fit <- rpart(targetTrain ~ ., data = train, method="class")
+  #summary(fit)
+  predsVal <- predict(fit, test)
+  
+  predVal <- (predsVal[,1])
+  auxVal <- ifelse (predVal > 0.50, 0, 1)
+  
+  return(as.numeric(auxVal))
 }
 #=====================================
 #função que implementa a AD
@@ -198,11 +209,14 @@ treeFunction <- function(train, test, targetTrain){
 mlpFunction <- function(train, test, targetTrain, targetTest){
   model <- mlp(	x = train, 
                 y = targetTrain, 
-                size = 5, 
-                learnFuncParams = c(0.1), 
-                maxit = 100, 
+                size = 10, 
+                learnFuncParams = c(0.03), 
+                maxit = 50, 
                 inputsTest = test, 
                 targetsTest = targetTest)
+  predsVal <- predict(model,test)
+  predVal <- ifelse (predsVal > 0.508, 1, 0)
+  return(predVal)
 }
 #=====================================
 #função que implementa o MLP
@@ -241,36 +255,81 @@ for (i in 1:7) {
   }
   
   #==================================
-  #'result' vai receber umvetor com a
+  #'result' vai receber um vetor com a
   #resposta do treinamento
   #==================================
   result <- knnFunction(part, partTeste, alvo, alvoTeste, K)
   
   #==================================
   #definindo os valores da matriz de
-  #confusão
+  #confusão KNN
   #==================================
   valores <- matrizConfusao(alvoTeste, result, VPknn, VNknn, FPknn, FNknn, 1194)
   VPknn =+ valores$VP
   VNknn =+ valores$VN
   FNknn =+ valores$FN
   FPknn =+ valores$FP
+  #print(as.matrix(part))
   
-  print(paste("KNN - particao", i))
-  print(paste("VP=", valores$VP))
-  print(paste("VN=", valores$VN))
-  print(paste("FN=", valores$FN))
-  print(paste("FP=", valores$FP))
+  part$combined_shot_type <- as.numeric(part$combined_shot_type)
+  part$shot_zone_area <- as.numeric(part$shot_zone_area)
+  part$shot_zone_basic <- as.numeric(part$shot_zone_basic)
+  part$opponent <- as.numeric(part$opponent)
+  
+  partTeste$combined_shot_type <- as.numeric(partTeste$combined_shot_type)
+  partTeste$shot_zone_area <- as.numeric(partTeste$shot_zone_area)
+  partTeste$shot_zone_basic <- as.numeric(partTeste$shot_zone_basic)
+  partTeste$opponent <- as.numeric(partTeste$opponent)
+  #print(as.matrix(partTeste))
+  
+  resultMlp <- mlpFunction(as.matrix(part), partTeste, alvo, alvoTeste)
+  valoresMlp <- matrizConfusao(alvoTeste, resultMlp, VPmlp, VNmlp, FPmlp, FNmlp, 1194)
+  VPmlp =+ valoresMlp$VP
+  VNmlp =+ valoresMlp$VN
+  FNmlp =+ valoresMlp$FN
+  FPmlp =+ valoresMlp$FP
+  #print(alvoTeste)
+  
+  resultAd <- treeFunction(part, partTeste, alvo)
+  valoresAd <- matrizConfusao(alvoTeste, resultAd, VPad, VNad, FPad, FNad, 1194)
+  VPad =+ valoresAd$VN
+  VNad =+ valoresAd$VP
+  FNad =+ valoresAd$FP
+  FPad =+ valoresAd$FN
+  #print(alvoTeste)-------------
+  
+  print(paste("particao", i))
+  print("KNN")
+  print(paste("VP=", VPknn))
+  print(paste("VN=", VNknn))
+  print(paste("FN=", FNknn))
+  print(paste("FP=", FPknn))
+  print("-------------------------------------")
+  print("AD")
+  print(paste("VP=", VPad))
+  print(paste("VN=", VNad))
+  print(paste("FN=", FNad))
+  print(paste("FP=", FPad))
+  print("-------------------------------------")
+  print("MLP")
+  print(paste("VP=", VPmlp))
+  print(paste("VN=", VNmlp))
+  print(paste("FN=", FNmlp))
+  print(paste("FP=", FPmlp))
   
   #treeFunction(part, partTeste, alvo)
   #mlpFunction(part, partTeste, alvo, alvoTeste)
-  print("---------------------------------------------------------------------------")
+  print("################################################################")
 }
 
 precisao(VPknn, FPknn, "VALIDAÇÂO KNN")
 revocacao(VPknn, FNknn, "VALIDAÇÂO KNN")
 
+precisao(VPmlp, FPmlp, "VALIDAÇÂO MLP")
+revocacao(VPmlp, FNmlp, "VALIDAÇÂO MLP")
 
+precisao(VPad, FPad, "VALIDAÇÂO AD")
+revocacao(VPad, FNad, "VALIDAÇÂO AD")
 
 
 #--------------------------------------------------------------------------------------------------------
@@ -298,11 +357,42 @@ precisao(VPknnTeste, FPknnTeste, "TESTE FINAL KNN")
 revocacao(VPknnTeste, FNknnTeste, "TESTE FINAL KNN")
 
 
+## MLP
+treinamentoSemSaida$combined_shot_type <- as.numeric(treinamentoSemSaida$combined_shot_type)
+treinamentoSemSaida$shot_zone_area <- as.numeric(treinamentoSemSaida$shot_zone_area)
+treinamentoSemSaida$shot_zone_basic <- as.numeric(treinamentoSemSaida$shot_zone_basic)
+treinamentoSemSaida$opponent <- as.numeric(treinamentoSemSaida$opponent)
+
+testeFinalSemSaida$combined_shot_type <- as.numeric(testeFinalSemSaida$combined_shot_type)
+testeFinalSemSaida$shot_zone_area <- as.numeric(testeFinalSemSaida$shot_zone_area)
+testeFinalSemSaida$shot_zone_basic <- as.numeric(testeFinalSemSaida$shot_zone_basic)
+testeFinalSemSaida$opponent <- as.numeric(testeFinalSemSaida$opponent)
 
 
-#--------------------------------------------------------------------------------------------------------
-#TÓPICO 7 - ANÁLISE DOS RESULTADOS ALGORITMO BASELINE
+resultMlpTeste <- mlpFunction(treinamentoSemSaida, testeFinalSemSaida, treinamentoFinalSaida, testeFinalSaida)
+valoresMlpTesteFinal <- matrizConfusao(testeFinalSaida, resultMlpTeste, VPmlpTeste, VNmlpTeste, FPmlpTeste, FNmlpTeste, 2034)
+VPmlpTeste =+ valoresMlpTesteFinal$VP
+VNmlpTeste =+ valoresMlpTesteFinal$VN
+FNmlpTeste =+ valoresMlpTesteFinal$FN
+FPmlpTeste =+ valoresMlpTesteFinal$FP
+print(paste("VP MLP teste final=", VPmlpTeste))
+print(paste("VN MLP teste final=", VNmlpTeste))
+print(paste("FN MLP teste final=", FNmlpTeste))
+print(paste("FP MLP teste final=", FPmlpTeste))
+precisao(VPmlpTeste, FPmlpTeste, "TESTE FINAL MLP")
+revocacao(VPmlpTeste, FNmlpTeste, "TESTE FINAL MLP")
 
 
-
-
+## AD
+resultAdTeste <- treeFunction(treinamentoSemSaida, testeFinalSemSaida, treinamentoFinalSaida)
+valoresAdTesteFinal <- matrizConfusao(testeFinalSaida, resultAdTeste, VPadTeste, VNadTeste, FPadTeste, FNadTeste, 2034)
+VPadTeste =+ valoresAdTesteFinal$VP
+VNadTeste =+ valoresAdTesteFinal$VN
+FNadTeste =+ valoresAdTesteFinal$FN
+FPadTeste =+ valoresAdTesteFinal$FP
+print(paste("VP AD teste final=", VPadTeste))
+print(paste("VN AD teste final=", VNadTeste))
+print(paste("FN AD teste final=", FNadTeste))
+print(paste("FP AD teste final=", FPadTeste))
+precisao(VPadTeste, FPadTeste, "TESTE FINAL AD")
+revocacao(VPadTeste, FNadTeste, "TESTE FINAL AD")
